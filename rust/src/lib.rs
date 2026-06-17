@@ -1,6 +1,7 @@
 // A simple C wrapper of tokenzier library
+use ahash::AHashMap;
 use serde_json::Value;
-use std::{collections::HashMap, str::FromStr};
+use std::str::FromStr;
 use tokenizers::models::bpe::BPE;
 use tokenizers::pre_tokenizers::byte_level::ByteLevel;
 use tokenizers::tokenizer::Tokenizer;
@@ -11,7 +12,7 @@ pub struct TokenizerWrapper {
     id_to_token_result: String,
 }
 
-pub type Vocab = HashMap<String, u32>;
+pub type Vocab = AHashMap<String, u32>;
 pub type Merges = Vec<(String, String)>;
 
 #[repr(C)]
@@ -35,8 +36,7 @@ impl TokenizerWrapper {
         added_tokens: &str,
     ) -> TokenizerWrapper {
         let vocab_json: Value = serde_json::from_str(vocab).unwrap();
-        let added_tokens_json: Value = serde_json::from_str(added_tokens).unwrap();
-        let mut vocab = HashMap::new();
+        let mut vocab = ahash::AHashMap::new();
         match vocab_json {
             Value::Object(m) => {
                 for (token, id) in m {
@@ -48,16 +48,19 @@ impl TokenizerWrapper {
             }
             _ => panic!("Invalid vocab.json file."),
         };
-        match added_tokens_json {
-            Value::Object(m) => {
-                for (token, id) in m {
-                    if let Value::Number(id) = id {
-                        let id = id.as_u64().unwrap() as u32;
-                        vocab.insert(token, id);
+        if !added_tokens.is_empty() {
+            let added_tokens_json: Value = serde_json::from_str(added_tokens).unwrap();
+            match added_tokens_json {
+                Value::Object(m) => {
+                    for (token, id) in m {
+                        if let Value::Number(id) = id {
+                            let id = id.as_u64().unwrap() as u32;
+                            vocab.insert(token, id);
+                        }
                     }
                 }
-            }
-            _ => panic!("Invalid added_tokens.json file."),
+                _ => panic!("Invalid added_tokens.json file."),
+            };
         }
 
         let merges = merges
@@ -107,7 +110,7 @@ impl TokenizerWrapper {
 #[no_mangle]
 extern "C" fn tokenizers_new_from_str(input_cstr: *const u8, len: usize) -> *mut TokenizerWrapper {
     unsafe {
-        let json = std::str::from_utf8(std::slice::from_raw_parts(input_cstr, len)).unwrap();
+        let json = &String::from_utf8_lossy(std::slice::from_raw_parts(input_cstr, len));
         return Box::into_raw(Box::new(TokenizerWrapper::from_str(json)));
     }
 }
@@ -123,14 +126,13 @@ extern "C" fn byte_level_bpe_tokenizers_new_from_str(
 ) -> *mut TokenizerWrapper {
     unsafe {
         let vocab =
-            std::str::from_utf8(std::slice::from_raw_parts(input_vocab_str, len_vocab)).unwrap();
+            &String::from_utf8_lossy(std::slice::from_raw_parts(input_vocab_str, len_vocab));
         let merges =
-            std::str::from_utf8(std::slice::from_raw_parts(input_merges_str, len_merges)).unwrap();
-        let added_tokens = std::str::from_utf8(std::slice::from_raw_parts(
+            &String::from_utf8_lossy(std::slice::from_raw_parts(input_merges_str, len_merges));
+        let added_tokens = &String::from_utf8_lossy(std::slice::from_raw_parts(
             input_added_tokens_str,
             len_added_tokens,
-        ))
-        .unwrap();
+        ));
         return Box::into_raw(Box::new(TokenizerWrapper::byte_level_bpe_from_str(
             vocab,
             merges,
@@ -216,7 +218,7 @@ extern "C" fn tokenizers_get_decode_str(
 ) {
     unsafe {
         *out_cstr = (*handle).decode_str.as_mut_ptr();
-        *out_len = (*handle).decode_str.len();
+        *out_len = (&(*handle).decode_str).len();
     }
 }
 
@@ -249,7 +251,7 @@ extern "C" fn tokenizers_id_to_token(
         };
 
         *out_cstr = (*handle).id_to_token_result.as_mut_ptr();
-        *out_len = (*handle).id_to_token_result.len();
+        *out_len = (&(*handle).id_to_token_result).len();
     }
 }
 
@@ -261,7 +263,7 @@ extern "C" fn tokenizers_token_to_id(
     out_id: *mut i32,
 ) {
     unsafe {
-        let token: &str = std::str::from_utf8(std::slice::from_raw_parts(token, len)).unwrap();
+        let token: &str = &String::from_utf8_lossy(std::slice::from_raw_parts(token, len));
         let id = (*handle).tokenizer.token_to_id(token);
         *out_id = match id {
             Some(id) => id as i32,
